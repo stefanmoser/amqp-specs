@@ -10,27 +10,27 @@
 
 ## 1  Introduction
 
-The Model Context Protocol (MCP) is an open protocol that connects LLM applications to external
+The Model Context Protocol (MCP) is an open protocol for connecting LLM applications to external
 tools and data sources. As of version 2026-07-28 it uses JSON-RPC 2.0 [JSON-RPC] and is stateless.
 MCP currently defines two transports: stdio and Streamable HTTP.
 
 This binding specification defines a binding of MCP onto AMQP 1.0 [AMQP-v1.0]. It defines the
-application endpoints so any conforming AMQP 1.0 broker or router can be used as an MCP transport
-without modification.
+application endpoints so MCP implementations can use any conforming AMQP 1.0 broker or router as a
+transport without modification.
 
-A separate binding specification for JSON-RPC 2.0 on AMQP 1.0 [JSONRPC-AMQP] defines how a JSON-RPC
-message is framed on AMQP and how a request is correlated with a response. This binding
-specification layers on that binding and defines only what MCP adds to it.
+A separate binding specification for JSON-RPC 2.0 on AMQP 1.0 [JSONRPC-AMQP] defines the framing of
+a JSON-RPC message on AMQP and the correlation of a response with its request. This binding
+specification applies that binding and defines only what MCP adds to it.
 
-MCP's transports today assume a direct, Client-initiated connection. AMQP opens MCP to the brokered
-and routed topologies that production messaging deployments already use, including paths that cross
-network boundaries and carry many Clients over one connection. Any request can be served by any
-Server instance, so a node with competing consumers behind a single address is an ordinary MCP
-deployment.
+MCP's transports today define a direct, Client-initiated connection. Over AMQP, MCP Clients and
+Servers can use the brokered and routed topologies that production messaging deployments already
+use, including paths that cross network boundaries and paths on which many Clients share one
+connection. Any Server instance can serve any request, so a node with competing consumers behind a
+single address is an ordinary MCP deployment.
 
-This binding specification deliberately does not address flow control and link credit, settlement
-policy, addressing conventions, error taxonomy, and security beyond the SASL and TLS mechanisms AMQP
-already provides.
+This binding specification does not address flow control and link credit, settlement policy,
+addressing conventions, error taxonomy, and security beyond the SASL and TLS mechanisms AMQP already
+defines.
 
 ### 1.1  Normative References
 
@@ -62,17 +62,17 @@ Link for receiving responses and notifications. A Server uses the inverse links:
 receiving requests and notifications, and a Reply Link for sending responses and notifications.
 
 The body of each JSON-RPC message is an MCP message defined by [MCP]. This binding specification
-does not add fields or modify its contents. The framing of JSON-RPC messages on AMQP is defined by
-[JSONRPC-AMQP].
+does not add fields or modify its contents. [JSONRPC-AMQP] defines the framing of JSON-RPC messages
+on AMQP.
 
 This binding specification applies only to MCP version 2026-07-28.
 
 ## 4  MCP Message Exchange
 
-[MCP] composes requests, responses, and notifications into three patterns: request and response,
-multi round-trip requests, and subscribe and notify. In each, the Server may send more than one
-message in response to a request, and it sends each of them to the request's Reply Address with the
-request's `message-id` as its `correlation-id` [JSONRPC-AMQP].
+[MCP] defines three patterns of requests, responses, and notifications: request and response, multi
+round-trip requests, and subscribe and notify. In each, the Server may send more than one message in
+response to a request, and it sends each of them to the request's Reply Address with the request's
+`message-id` as its `correlation-id` [JSONRPC-AMQP].
 
 ### 4.1  Request and Response
 
@@ -86,10 +86,10 @@ progress notifications. The Server sends the notifications and the response with
 When a Server needs Client input to complete a request, it sends a response to the Reply Address
 with an `InputRequiredResult`, and the Client retries by sending the original `params` together with
 `inputResponses` [MCP]. The retry is a new JSON-RPC request that is not correlated with the original
-request. It has a new `id`, so [JSONRPC-AMQP] binds it as a new request, with a new `message-id`. If
-the Request Address is served by multiple Server instances, the new request can be served by any
-instance since the retry carries the original `params`, any `inputResponses`, and the `requestState`
-the Server returned [MCP].
+request. It has a new `id`, so the Client sends it with a new `message-id` [JSONRPC-AMQP]. If
+multiple Server instances serve the Request Address, any instance can serve the retry, since the
+retry contains the original `params`, any `inputResponses`, and the `requestState` the Server
+returned [MCP].
 
 ### 4.3  Subscribe and Notify
 
@@ -100,29 +100,29 @@ the stream stays open [JSONRPC-AMQP].
 
 ## 5  Link Topology
 
-A Client sends messages to a Request Address and receives messages on its Reply Address. A node
-backing the Request Address may be shared by many Clients and served by many Server instances: using
+A Client sends messages to a Request Address and receives messages on its Reply Address. Many
+Clients may share a node backing the Request Address, and many Server instances may serve it: using
 the per-request correlation [JSONRPC-AMQP] defines, a Server returns each response to the Client
-that issued the request, with no shared state at the intermediary.
+that issued the request, and the intermediary does not keep any shared state.
 
 ## 6  Cancellation
 
-Unlike stdio and Streamable HTTP, AMQP does not cancel a request when a connection fails, so a
-Client limits how long it waits for the response to each request [JSONRPC-AMQP]. Once that time is
-exceeded, a Client MUST cancel the request by sending `notifications/cancelled`, with `requestId`
-set to the request's `id` [MCP].
+Unlike stdio and Streamable HTTP, AMQP does not define a connection failure as cancelling a
+request, so a Client limits how long it waits for the response to each request [JSONRPC-AMQP]. Once
+that time has elapsed, a Client MUST cancel the request by sending `notifications/cancelled`, with
+`requestId` set to the request's `id` [MCP].
 
-A Server MUST limit how long it keeps a subscription stream open. Once that time is exceeded, it
+A Server MUST limit how long it keeps a subscription stream open. Once that time has elapsed, it
 MUST end the stream, and SHOULD do so by sending the response to the `subscriptions/listen` request,
 a result with `resultType` set to `complete`, to the request's Reply Address.
 
 ## 7  Ordering
 
 [MCP] requires a Server to send `notifications/subscriptions/acknowledged` as the first message on a
-`subscriptions/listen` stream, and not to send any notification on the stream before it. AMQP
-guarantees the order of messages within a link, so a Server MUST send all of its messages for a
-request on one Reply Link, in the order [MCP] requires. An intermediary may still deliver them to
-the Client in a different order [JSONRPC-AMQP].
+`subscriptions/listen` stream, and not to send any notification on the stream before it. An AMQP
+receiver on a link receives messages in the order the sender sent them, so a Server MUST send all of
+its messages for a request on one Reply Link, in the order [MCP] requires. An intermediary may still
+deliver them to the Client in a different order [JSONRPC-AMQP].
 
 ## 8  Authorization
 
@@ -130,8 +130,8 @@ This binding specification uses the SASL and TLS mechanisms defined by [AMQP-v1.
 
 ## Appendix A  Example Exchange (Informative)
 
-The following example is a simple exchange through an intermediary consisting of a link setup, one
-tool call, a progress notification, and a result.
+The following example shows link setup, one tool call, a progress notification, and a result
+through an intermediary.
 
 ```mermaid
 sequenceDiagram
@@ -158,7 +158,7 @@ The intermediary relays each transfer without modifying the JSON-RPC message.
 
 ## Appendix B  Revision History (Informative)
 
-Newest first. One line per revision; the commit history of this file carries the detail.
+Newest first. One line per revision; the commit messages for this file contain the detail.
 
 | Date | Change |
 |------|--------|
